@@ -3,3 +3,4 @@ venv/
 .*.swp
 twitter_data/
 __pycache__/
+tweets2matrix_config.json

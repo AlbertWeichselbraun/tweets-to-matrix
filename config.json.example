@@ -1,0 +1,20 @@
+{
+  "twitter_auth": {
+    "oauth_token": "",
+    "oauth_token_secret": "",
+    "app_consumer_key": "",
+    "app_consumer_secret": ""
+  },
+  "matrix_auth": {
+    "homeserver": "",
+    "user": "",
+    "access_token": "",
+    "room_id": ""
+  },
+
+  "twitter_search_queries": [
+    {"q": "creditsuisse", "result_lang": "de", "result_type": "mixed" },
+    {"q": "ubs", "result_lang":  "de", "result_type":  "mixed"}
+  ],
+  "poll_delay_secs": 120
+}

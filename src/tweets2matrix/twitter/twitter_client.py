@@ -9,17 +9,19 @@ TODO:
 """
 
 import logging
-import sys
 from collections import defaultdict, deque
 from enum import Enum
 from pathlib import Path
 
 from twitter.api import *
-from twitter.oauth import OAuth, read_token_file
+from twitter.oauth import OAuth
 
 from tweets2matrix.store.filesystemstorage import FileSystemStorage
 
-logging.basicConfig(level=logging.INFO)
+
+# maximum number of results returned by the API
+# (this is a Twitter API limit)
+MAX_RESULT_COUNT = 100
 
 KNOWN_TWEETS_LIST_SIZE = 5000
 STORAGE_DIR = 'twitter_data'
@@ -42,8 +44,9 @@ class TwitterSearchLanguage(Enum):
 
 class TwitterClient:
 
-    def __init__(self):
-        self.twitter = Twitter(auth=self.get_oauth_token())
+    def __init__(self, oauth_token: str, oauth_token_secret: str, app_consumer_key: str, app_consumer_secret: str):
+        auth_token = OAuth(oauth_token, oauth_token_secret, app_consumer_key, app_consumer_secret)
+        self.twitter = Twitter(auth=auth_token)
         self.storage = FileSystemStorage(STORAGE_DIR)
         self.since_ids = defaultdict(int)
         self.known_tweet_ids = deque(maxlen=KNOWN_TWEETS_LIST_SIZE)
@@ -51,27 +54,13 @@ class TwitterClient:
         credential = self.twitter.account.verify_credentials()
         logging.info(f'Successfully authenticated user {credential["screen_name"]}')
 
-    @staticmethod
-    def get_oauth_token():
-        """
-        Returns:
-             A Twitter OAuth token.
-        """
-        if not TWITTER_OAUTH.exists():
-            logging.error(f'No twitter credentials in {TWITTER_OAUTH} found.')
-            sys.exit()
-
-        oauth_token, oauth_token_secret = read_token_file(str(TWITTER_OAUTH))
-        app_consumer_key, app_consumer_secret = read_token_file(str(TWITTER_CONSUMER))
-        return OAuth(oauth_token, oauth_token_secret, app_consumer_key, app_consumer_secret)
-
     def get_new_tweets(self, tweets):
         """
         Return:
             Tweets that haven't been seen yet
         """
         result = []
-        for tweet in tweets:
+        for tweet in reversed(tweets):    # chronological order
             tweet_id = tweet['id']
             if tweet_id > self.since_ids['home_timeline']:
                 self.since_ids['home_timeline'] = tweet_id
@@ -82,20 +71,45 @@ class TwitterClient:
         return result
 
     def get_home_timeline(self, count: int = 25):
-        kwargs = {'count': count}
+        kwargs = {'count': min(count, MAX_RESULT_COUNT),
+                  'tweet_mode': 'extended'}
         if self.since_ids['home_timeline']:
             kwargs['since_id'] = self.since_ids['home_timeline']
         return self.get_new_tweets(self.twitter.statuses.home_timeline(**kwargs))
 
-    def search(self, query: str, result_type: TwitterSearchType = TwitterSearchType.mixed,
+    def search(self, q: str, result_type: TwitterSearchType = TwitterSearchType.mixed,
                result_lang: TwitterSearchLanguage = TwitterSearchLanguage.en, count: int = 100):
-        kwargs = {'count': min(count, 100),
+        """
+        Search for the given queries on Twitter.
+
+        Args:
+            q: the query string
+            result_type: the TwitterSearchType to search for
+            result_lang: the TwitterSearchLanguage to use.
+            count: maximum number of results (max. 100)
+        """
+        kwargs = {'count': min(count, MAX_RESULT_COUNT),
                   'result_type': result_type.name,
                   'lang': result_lang.name,
-                  'q': query}
+                  'tweet_mode': 'extended',
+                  'q': q}
+
+        if self.since_ids['search']:
+            kwargs['since_id'] = self.since_ids['search']
         return self.get_new_tweets(self.twitter.search.tweets(**kwargs)['statuses'])
 
+    @staticmethod
+    def get_tweet_text(tweet):
+        """Create a text representation of the given tweet"""
+        if 'retweeted_status' in tweet:
+            rt_status = tweet['retweeted_status']
+            if 'extended_tweet' in rt_status:
+                elem = rt_status['extended_tweet']
+            else:
+                elem = rt_status
+            rt_text = elem['full_text'] if 'full_text' in elem else elem['text']
+            tweet['full_text'] = 'RT @' + rt_status['user']['screen_name'] + ': ' + rt_text
+        elif 'extended_tweet' in tweet:
+            tweet['full_text'] = tweet['extended_tweet']['full_text']
 
-twitter = TwitterClient()
-print(twitter.search('creditsuisse', lang=TwitterSearchLanguage.de))
-# print(twitter.get_home_timeline())
+        return tweet['full_text'] if 'full_text' in tweet else tweet['text']
